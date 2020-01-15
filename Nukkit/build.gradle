@@ -1,11 +1,11 @@
 repositories {
-    maven { url = "https://oss.sonatype.org/content/repositories/snapshots/"}
-    maven {url "http://nexus.hc.to/content/repositories/pub_releases"}
-    maven {url "https://repo.nukkitx.com/maven-snapshots"} 
+    maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
+    maven { url "http://nexus.hc.to/content/repositories/pub_releases" }
+    maven { url "https://repo.nukkitx.com/maven-snapshots" }
 }
 
 dependencies {
-    implementation project (':Core')
+    implementation project(':Core')
     compile project(':Core')
     compile 'com.google.guava:guava:21.0'
     compile 'cn.nukkit:nukkit:1.0-SNAPSHOT'
@@ -22,8 +22,38 @@ processResources {
         )
     }
 }
-// We only want the shadow jar produced
-jar.enabled = false
+
+jar.archiveFileName = "plotsquared-nukkitapi-${project.parent.version}.jar"
+jar.destinationDirectory = file '../mvn/com/plotsquared/plotsquared-nukkitapi/' + project.parent.version
+task createPom {
+    doLast {
+        pom {
+            project {
+                groupId = "com.plotsquared"
+                artifactId = "plotsquared-nukkitapi"
+                version = project.parent.version
+            }
+        }.writeTo("../mvn/com/plotsquared/plotsquared-nukkitapi/${project.parent.version}/plotsquared-nukkitapi-${project.parent.version}.pom")
+        pom {
+            project {
+                groupId = "com.plotsquared"
+                artifactId = "plotsquared-nukkitapi"
+                version = "latest"
+            }
+        }.writeTo("../mvn/com/plotsquared/plotsquared-nukkitapi/latest/plotsquared-nukkitapi-latest.pom")
+    }
+}
+
+task copyFiles {
+    doLast {
+        copy {
+            from("../mvn/com/plotsquared/plotsquared-nukkitapi/${project.parent.version}/")
+            into("../mvn/com/plotsquared/plotsquared-nukkitapi/latest/")
+            include("plotsquared-nukkitapi*.jar")
+            rename("plotsquared-nukkitapi-${project.parent.version}.jar", "plotsquared-nukkitapi-latest.jar")
+        }
+    }
+}
 
 shadowJar {
     dependencies {
@@ -39,7 +69,9 @@ shadowJar {
 
 shadowJar.doLast {
     task ->
-    ant.checksum file: task.archivePath
+        ant.checksum file: task.archivePath
 }
 
-build.dependsOn(shadowJar);
+build.dependsOn(shadowJar)
+build.finalizedBy(copyFiles)
+copyFiles.dependsOn(createPom)

@@ -2,6 +2,7 @@ package com.plotsquared.sponge.listener;
 
 import com.intellectualcrafters.plot.PS;
 import com.intellectualcrafters.plot.config.C;
+import com.intellectualcrafters.plot.config.Settings;
 import com.intellectualcrafters.plot.flag.Flags;
 import com.intellectualcrafters.plot.object.*;
 import com.intellectualcrafters.plot.util.*;
@@ -28,6 +29,7 @@ import org.spongepowered.api.event.block.NotifyNeighborBlockEvent;
 import org.spongepowered.api.event.entity.BreedEntityEvent;
 import org.spongepowered.api.event.entity.MoveEntityEvent;
 import org.spongepowered.api.event.entity.SpawnEntityEvent;
+import org.spongepowered.api.event.filter.cause.Root;
 import org.spongepowered.api.event.message.MessageEvent;
 import org.spongepowered.api.event.network.ClientConnectionEvent;
 import org.spongepowered.api.event.world.ExplosionEvent;
@@ -35,13 +37,17 @@ import org.spongepowered.api.event.world.ExplosionEvent.Detonate;
 import org.spongepowered.api.text.Text;
 import org.spongepowered.api.world.World;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuppressWarnings("Guava")
 public class MainListener {
-    
+
     /*
      * TODO:
      *  - Anything marked with a TODO below
@@ -154,6 +160,11 @@ public class MainListener {
                 return true;
             }
             Location loc = SpongeUtil.getLocation(entity);
+            if (EntityTypes.ITEM == entity.getType()) {
+                if (Settings.Enabled_Components.KILL_ROAD_ITEMS && loc.getOwnedPlotAbs() == null) {
+                    return false;
+                }
+            }
             Plot plot = loc.getPlot();
             if (plot == null) {
                 return !loc.isPlotRoad();
@@ -176,7 +187,7 @@ public class MainListener {
                 }
                 com.google.common.base.Optional<Integer> mobCap = plot.getFlag(Flags.MOB_CAP);
                 if (mobCap.isPresent()) {
-                    Integer cap = mobCap.get();
+                    int cap = mobCap.get();
                     if (cap == 0) {
                         return false;
                     }
@@ -230,7 +241,7 @@ public class MainListener {
             }
             com.google.common.base.Optional<Integer> entityCap = plot.getFlag(Flags.ENTITY_CAP);
             if (entityCap.isPresent()) {
-                Integer cap = entityCap.get();
+                int cap = entityCap.get();
                 if (cap == 0) {
                     return false;
                 }
@@ -253,7 +264,7 @@ public class MainListener {
         //        SpongeUtil.printCause("physics", event.getCause());
         //        PlotArea area = plotloc.getPlotArea();
         //        event.filterDirections(new Predicate<Direction>() {
-        //            
+        //
         //            @Override
         //            public boolean test(Direction dir) {
         //                if (cancelled.get()) {
@@ -292,11 +303,12 @@ public class MainListener {
             return;
         }
         BlockSnapshot block = event.getTargetBlock();
-        Optional<org.spongepowered.api.world.Location<World>> bloc = block.getLocation();
-        if (!bloc.isPresent()) {
+        Optional<org.spongepowered.api.world.Location<World>> blockLocation = block.getLocation();
+        if (!blockLocation.isPresent()) {
             return;
         }
-        Location loc = SpongeUtil.getLocation(player.getWorld().getName(), bloc.get());
+        Location loc =
+            SpongeUtil.getLocation(blockLocation.get().getExtent().getName(), blockLocation.get());
         PlotArea area = loc.getPlotArea();
         if (area == null) {
             return;
@@ -322,7 +334,7 @@ public class MainListener {
             return;
         } else {
             com.google.common.base.Optional<HashSet<PlotBlock>> flag = plot.getFlag(Flags.USE);
-            org.spongepowered.api.world.Location l = SpongeUtil.getLocation(loc);
+            org.spongepowered.api.world.Location<World> l = SpongeUtil.getLocation(loc);
             if (flag.isPresent() && flag.get().contains(SpongeUtil.getPlotBlock(l.getBlock()))) {
                 return;
             }
@@ -375,25 +387,24 @@ public class MainListener {
         List<Transaction<BlockSnapshot>> transactions = event.getTransactions();
         Transaction<BlockSnapshot> first = transactions.get(0);
         BlockSnapshot original = first.getOriginal();
-        Optional<World> world = SpongeMain.THIS.getServer().getWorld(original.getWorldUniqueId());
-        if (!world.isPresent()) {
+        if (!original.getLocation().isPresent()) {
             return;
         }
-        String worldName = world.get().getName();
-        Location loc = SpongeUtil.getLocation(worldName, original.getPosition());
-        PlotArea area = loc.getPlotArea();
+        String worldName = original.getLocation().get().getExtent().getName();
+        Location location = SpongeUtil.getLocation(original.getLocation().get());
+        PlotArea area = location.getPlotArea();
         if (area == null) {
             return;
         }
-        Plot plot = area.getPlot(loc);
+        Plot plot = area.getPlot(location);
         if (plot == null) {
-            if (!loc.isPlotArea()) {
+            if (!location.isPlotArea()) {
                 return;
             }
             event.setCancelled(true);
             return;
         }
-        event.filter(loc1 -> !SpongeUtil.getLocation(worldName, loc1).isPlotRoad());
+        event.filter(worldLocation -> !SpongeUtil.getLocation(worldLocation).isPlotRoad());
     }
 
     @Listener
@@ -411,22 +422,16 @@ public class MainListener {
         onChangeBlock(event);
     }
 
-    @Listener
-    public void onBlockBreak(ChangeBlockEvent.Break event) {
-        Player player = SpongeUtil.getCause(event.getCause(), Player.class);
-        if (player == null) {
-            //SpongeUtil.printCause("break", event.getCause());
-            return;
-        }
+    @Listener public void onBlockBreak(ChangeBlockEvent.Break event, @Root Player player) {
         PlotPlayer pp = SpongeUtil.getPlayer(player);
         List<Transaction<BlockSnapshot>> transactions = event.getTransactions();
         Transaction<BlockSnapshot> first = transactions.get(0);
         BlockSnapshot original = first.getOriginal();
-        Optional<World> world = SpongeMain.THIS.getServer().getWorld(original.getWorldUniqueId());
-        if (!world.isPresent()) {
+        if (!original.getLocation().isPresent()) {
             return;
         }
-        String worldName = world.get().getName();
+        World world = original.getLocation().get().getExtent();
+        String worldName = world.getName();
         Location loc = SpongeUtil.getLocation(worldName, original.getPosition());
         Plot plot = loc.getPlot();
         if (plot == null) {
@@ -488,12 +493,7 @@ public class MainListener {
         });
     }
 
-    @Listener
-    public void onBlockPlace(ChangeBlockEvent.Pre event) {
-        Player player = SpongeUtil.getCause(event.getCause(), Player.class);
-        if (player == null) {
-            return;
-        }
+    @Listener public void onBlockPlace(ChangeBlockEvent.Pre event, @Root Player player) {
         PlotPlayer pp = SpongeUtil.getPlayer(player);
         List<org.spongepowered.api.world.Location<World>> locs = event.getLocations();
         org.spongepowered.api.world.Location<World> first = locs.get(0);
@@ -735,7 +735,7 @@ public class MainListener {
                 event.setCancelled(true);
                 return;
             }
-            Integer border = area.getBorder();
+            int border = area.getBorder();
             if (z2 > border) {
                 to.add(0, 0, z2 - border - 4);
                 player.setLocation(to);
